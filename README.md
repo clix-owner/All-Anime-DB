@@ -96,3 +96,19 @@ Publishing uses a clean temporary worktree created from the latest
 `origin/main`. This preserves commits pushed while the long fetch was running
 and prevents the old-checkout non-fast-forward failure. The final short publish
 window is retried up to three times if `main` moves concurrently.
+
+## Public JSON publishing
+
+The workflow can also publish `anime_all_complete.json` to a separate public repository.
+
+Configure these GitHub Actions repository variables in the source repository:
+
+- `PUBLIC_DATA_REPO` — required, e.g. `owner/public-data-repo`
+- `PUBLIC_DATA_BRANCH` — optional, defaults to `main`
+- `PUBLIC_DATA_PATH` — optional, defaults to `anime_all_complete.json`
+
+Configure this GitHub Actions repository secret:
+
+- `PUBLIC_DATA_TOKEN` — a fine-grained PAT with **Contents: Read and write** access to the target repository.
+
+The workflow only stages and updates `PUBLIC_DATA_PATH`; it does not delete or stage unrelated files in the public repository.

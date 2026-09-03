@@ -289,3 +289,78 @@ jobs:
 
           echo "Failed to publish after 3 fresh latest-main attempts."
           exit 1
+
+      - name: Publish JSON to public repository
+        if: always()
+        env:
+          TARGET_REPO: ${{ vars.PUBLIC_DATA_REPO }}
+          TARGET_BRANCH: ${{ vars.PUBLIC_DATA_BRANCH || 'main' }}
+          TARGET_PATH: ${{ vars.PUBLIC_DATA_PATH || 'anime_all_complete.json' }}
+          PUBLIC_DATA_TOKEN: ${{ secrets.PUBLIC_DATA_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f anime_all_complete.json ]; then
+            echo "anime_all_complete.json does not exist; nothing to publish."
+            exit 0
+          fi
+
+          if [ -z "${TARGET_REPO:-}" ]; then
+            echo "Missing repository variable: PUBLIC_DATA_REPO (example: owner/public-data-repo)"
+            exit 1
+          fi
+
+          if [ -z "${PUBLIC_DATA_TOKEN:-}" ]; then
+            echo "Missing Actions secret: PUBLIC_DATA_TOKEN"
+            exit 1
+          fi
+
+          SOURCE_JSON="$PWD/anime_all_complete.json"
+          python -m json.tool "$SOURCE_JSON" >/dev/null
+
+          TARGET_DIR="$RUNNER_TEMP/public-anime-data"
+          rm -rf "$TARGET_DIR"
+
+          # Clone using the PAT. The token is masked by GitHub Actions.
+          git clone \
+            --branch "$TARGET_BRANCH" \
+            --single-branch \
+            "https://x-access-token:${PUBLIC_DATA_TOKEN}@github.com/${TARGET_REPO}.git" \
+            "$TARGET_DIR"
+
+          cd "$TARGET_DIR"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Only TARGET_PATH is managed by this workflow.
+          # Other files in the shared public repo are never removed or staged.
+          for ATTEMPT in 1 2 3; do
+            echo "Public publish attempt ${ATTEMPT}/3"
+
+            git fetch origin "$TARGET_BRANCH"
+            git reset --hard "origin/$TARGET_BRANCH"
+
+            mkdir -p "$(dirname "$TARGET_PATH")"
+            cp "$SOURCE_JSON" "$TARGET_PATH"
+
+            git add -- "$TARGET_PATH"
+
+            if git diff --cached --quiet; then
+              echo "No public JSON changes to publish."
+              exit 0
+            fi
+
+            git commit -m "chore: update ${TARGET_PATH}"
+
+            if git push origin "HEAD:$TARGET_BRANCH"; then
+              echo "Published ${TARGET_PATH} to ${TARGET_REPO}@${TARGET_BRANCH}"
+              exit 0
+            fi
+
+            echo "Target branch moved during push; retrying from latest remote state."
+          done
+
+          echo "Failed to publish after 3 attempts."
+          exit 1
+
