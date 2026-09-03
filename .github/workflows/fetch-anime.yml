@@ -246,6 +246,35 @@ jobs:
             anilist_lookup_cache.json
             mal_detail_cache.json
           key: anime-fetch-v4-part-4-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Detect anime_all_complete.json change
+        id: source-change
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f anime_all_complete.json ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No generated anime_all_complete.json."
+            exit 0
+          fi
+
+          git fetch origin main
+
+          OLD_FILE="$RUNNER_TEMP/origin-anime_all_complete.json"
+          if git show origin/main:anime_all_complete.json > "$OLD_FILE" 2>/dev/null; then
+            if cmp -s anime_all_complete.json "$OLD_FILE"; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              echo "anime_all_complete.json is unchanged."
+            else
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              echo "anime_all_complete.json changed."
+            fi
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "anime_all_complete.json is new."
+          fi
+
       - name: Commit generated JSON
         if: always()
         shell: bash
@@ -289,6 +318,21 @@ jobs:
 
           echo "Failed to publish after 3 fresh latest-main attempts."
           exit 1
+
+      - name: Trigger merge workflow when source changed
+        if: steps.source-change.outputs.changed == 'true'
+        env:
+          MERGE_REPO: ${{ vars.MERGE_REPO || secrets.MERGE_REPO }}
+          MERGE_DISPATCH_TOKEN: ${{ secrets.MERGE_DISPATCH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "${MERGE_REPO:-}" || { echo "::error::Missing MERGE_REPO variable/secret (owner/repo)"; exit 1; }
+          test -n "${MERGE_DISPATCH_TOKEN:-}" || { echo "::error::Missing MERGE_DISPATCH_TOKEN secret"; exit 1; }
+
+          echo "Triggering merge workflow in ${MERGE_REPO}"
+          curl --fail-with-body --silent --show-error             --request POST             --header "Accept: application/vnd.github+json"             --header "Authorization: Bearer ${MERGE_DISPATCH_TOKEN}"             --header "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/${MERGE_REPO}/dispatches"             --data '{"event_type":"anime-sources-updated","client_payload":{"source":"anime_all_complete.json"}}'
 
       - name: Publish JSON to public repository
         if: always()

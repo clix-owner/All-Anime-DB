@@ -112,3 +112,17 @@ Configure this GitHub Actions repository secret:
 - `PUBLIC_DATA_TOKEN` — a fine-grained PAT with **Contents: Read and write** access to the target repository.
 
 The workflow only stages and updates `PUBLIC_DATA_PATH`; it does not delete or stage unrelated files in the public repository.
+
+## Automatic merge trigger
+
+When this source JSON changes, this workflow sends a GitHub
+`repository_dispatch` event named `anime-sources-updated` to the merge repo.
+
+Configure in this source repository:
+
+- `MERGE_REPO` — repository Variable (or Secret), e.g. `owner/anime-merge-repo`
+- `MERGE_DISPATCH_TOKEN` — repository Secret. Use a fine-grained PAT that can
+  access the merge repository and has **Contents: Read and write** permission.
+
+The dispatch is sent only when this workflow detects that its generated source
+JSON differs from the current copy on `origin/main`.
