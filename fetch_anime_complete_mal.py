@@ -572,7 +572,7 @@ def save_output(entries):
     }
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
+        json.dump(output, f, ensure_ascii=False, separators=(",", ":"))
 
     print(f"\n=> Saved : {OUTPUT_FILE}")
     print(f"   Total         : {len(seen)}")
@@ -638,6 +638,28 @@ def fetch_season_all_pages(year, season, force_refresh=False):
     return "ok", nodes
 
 
+
+FRIBB_SEED_URL = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json"
+
+def load_fribb_seed():
+    """Fetch public Fribb mapping to recover start_season-less MAL IDs and missing AniList IDs."""
+    extra_mal_ids = set()
+    anilist_fallback = {}
+    try:
+        r = requests.get(FRIBB_SEED_URL, timeout=45)
+        r.raise_for_status()
+        for row in r.json():
+            mid = row.get("mal_id")
+            if isinstance(mid, int) and mid > 0:
+                extra_mal_ids.add(mid)
+                aid = row.get("anilist_id")
+                if isinstance(aid, int) and aid > 0:
+                    anilist_fallback[mid] = aid
+        print(f"[Seed] Loaded Fribb seed: {len(extra_mal_ids)} MAL IDs, {len(anilist_fallback)} AniList fallbacks", flush=True)
+    except Exception as exc:
+        print(f"[Seed] Fribb seed skipped ({exc})", flush=True)
+    return extra_mal_ids, anilist_fallback
+
 def main():
     print("Anime Complete Fetcher  (MAL Official API + related_anime + AniList ID)")
     print(f"Output : {OUTPUT_FILE}")
@@ -682,16 +704,20 @@ def main():
     # title from its seasonal listing.
     plan_index = {pair: idx for idx, pair in enumerate(all_seasons)}
     old_ids_by_plan_index = defaultdict(list)
-    if run_mode == "incremental" and all_seasons:
-        for entry in all_entries:
-            mid = entry.get("mal_id")
-            if not mid:
-                continue
-            pair = (entry.get("season_year"), entry.get("season"))
-            idx = plan_index.get(pair)
-            if idx is None:
-                idx = mid % len(all_seasons)
-            old_ids_by_plan_index[idx].append(mid)
+    fribb_mal_ids, fribb_anilist_fallback = load_fribb_seed()
+    if all_seasons:
+        if run_mode == "incremental":
+            for entry in all_entries:
+                mid = entry.get("mal_id")
+                if not mid:
+                    continue
+                pair = (entry.get("season_year"), entry.get("season"))
+                idx = plan_index.get(pair)
+                if idx is None:
+                    idx = mid % len(all_seasons)
+                old_ids_by_plan_index[idx].append(mid)
+        for mid in sorted(fribb_mal_ids - existing_mal_ids):
+            old_ids_by_plan_index[mid % len(all_seasons)].append(mid)
     detail_cache = load_compact_detail_cache(
         _checked_mal_ids if run_mode == "incremental" else existing_mal_ids
     )
@@ -711,7 +737,7 @@ def main():
                 year, season, force_refresh=(run_mode == "incremental")
             )
 
-            if season_status == "ok" and run_mode == "incremental":
+            if season_status == "ok":
                 listed_ids = {item.get("id") for item in anime_list}
                 anime_list.extend(
                     {"id": mid}
@@ -824,6 +850,9 @@ def main():
                 lookup_ids = [mid for mid in mal_ids if mid not in anilist_map]
                 for i in range(0, len(lookup_ids), ANILIST_BATCH):
                     anilist_map.update(anilist_lookup(lookup_ids[i:i + ANILIST_BATCH]))
+                for mid in mal_ids:
+                    if not anilist_map.get(mid) and mid in fribb_anilist_fallback:
+                        anilist_map[mid] = fribb_anilist_fallback[mid]
 
                 changed_count = 0
                 unchanged_count = 0
